@@ -105,7 +105,9 @@ def main():
     r.add_argument("--deadline", type=int, default=3, help="hard auto-stop after N hours")
     r.add_argument("--args", default="", help="ARGS override for pod_boot/train.py (quoted)")
     r.add_argument("--cloud", default="COMMUNITY", help="COMMUNITY (cheap) or SECURE")
-    r.add_argument("--disk", type=int, default=40, help="container disk GB")
+    r.add_argument("--disk", type=int, default=40, help="container disk GB (raise for big mixes: 20GB .bin per ~10B tokens)")
+    r.add_argument("--shards", type=int, default=0,
+                   help="MIX_EDU_SHARDS: FineWeb-Edu shards to build (~0.14B unique tokens each; 0=pod default of 3)")
     r.add_argument("--no-volume", action="store_true",
                    help="deploy WITHOUT the network volume -> RunPod can place the pod in ANY "
                         "datacenter with the GPU free (data ephemeral; final model still -> HF)")
@@ -146,6 +148,8 @@ def main():
     }
     if a.args:
         env["ARGS"] = a.args
+    if a.shards:
+        env["MIX_EDU_SHARDS"] = str(a.shards)      # bigger unique-token dataset
     inp = {
         "cloudType": a.cloud,
         "gpuTypeId": a.gpu,
