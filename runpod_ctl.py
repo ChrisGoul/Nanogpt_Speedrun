@@ -63,19 +63,34 @@ def gql(query, variables=None, tries=3):
     if variables is not None:
         body["variables"] = variables
     data = json.dumps(body).encode()
+    headers = {
+        "Content-Type": "application/json",
+        # a real User-Agent gets past Cloudflare (it 403s the default Python-urllib UA)
+        "User-Agent": "runpod_ctl/1.0 (+https://github.com/ChrisGoul/Nanogpt_Speedrun)",
+        "Authorization": f"Bearer {key}",           # modern auth (query ?api_key= also kept)
+    }
     last = None
-    for _ in range(tries):                       # retry: your wifi is flaky
+    for _ in range(tries):                          # retry: flaky connection
         try:
             req = urllib.request.Request(f"{API}?api_key={key}", data=data,
-                                         headers={"Content-Type": "application/json"}, method="POST")
+                                         headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=60) as r:
                 out = json.loads(r.read())
             if out.get("errors"):
                 sys.exit("[runpod_ctl] API error:\n" + json.dumps(out["errors"], indent=2))
             return out["data"]
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode(errors="replace")[:600]
+            except Exception:
+                pass
+            last = f"HTTP {e.code} {e.reason}" + (f" — {detail}" if detail else "")
+            if e.code in (401, 403):                # auth problem — retrying won't help
+                break
         except (urllib.error.URLError, TimeoutError) as e:
             last = e
-    sys.exit(f"[runpod_ctl] network error after {tries} tries: {last}")
+    sys.exit(f"[runpod_ctl] request failed: {last}")
 
 def main():
     load_env()
