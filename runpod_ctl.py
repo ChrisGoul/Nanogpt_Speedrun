@@ -106,6 +106,9 @@ def main():
     r.add_argument("--args", default="", help="ARGS override for pod_boot/train.py (quoted)")
     r.add_argument("--cloud", default="COMMUNITY", help="COMMUNITY (cheap) or SECURE")
     r.add_argument("--disk", type=int, default=40, help="container disk GB")
+    r.add_argument("--no-volume", action="store_true",
+                   help="deploy WITHOUT the network volume -> RunPod can place the pod in ANY "
+                        "datacenter with the GPU free (data ephemeral; final model still -> HF)")
     r.add_argument("--dry-run", action="store_true")
     st = sub.add_parser("stop"); st.add_argument("pod_id")
     tm = sub.add_parser("terminate"); tm.add_argument("pod_id")
@@ -131,8 +134,9 @@ def main():
 
     # --- run: deploy a pod that trains itself and stops ---
     repo = os.environ.get("REPO_URL", "https://github.com/ChrisGoul/Nanogpt_Speedrun")
-    start_cmd = (f'bash -c "cd /workspace && (git -C nanogpt pull --ff-only || '
-                 f'git clone {repo} nanogpt) && bash nanogpt/pod_boot.sh"')
+    start_cmd = (f'bash -c "mkdir -p /workspace && cd /workspace && '
+                 f'(git -C nanogpt pull --ff-only || git clone {repo} nanogpt) && '
+                 f'bash nanogpt/pod_boot.sh"')
     env = {
         "RUN": a.name,
         "GPU_PEAK": str(a.peak),
@@ -149,13 +153,18 @@ def main():
         "name": f"train-{a.name}",
         "imageName": os.environ.get("IMAGE", "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"),
         "containerDiskInGb": a.disk,
-        "volumeInGb": 0,                                  # 0: using a NETWORK volume
-        "volumeMountPath": "/workspace",
-        "networkVolumeId": need("NETWORK_VOLUME_ID"),
         "dockerArgs": start_cmd,
         "ports": "22/tcp",
         "env": [{"key": k, "value": v} for k, v in env.items()],
     }
+    vol = "" if a.no_volume else os.environ.get("NETWORK_VOLUME_ID", "").strip()
+    if vol:
+        inp["networkVolumeId"] = vol       # pins the pod to the volume's datacenter
+        inp["volumeMountPath"] = "/workspace"
+        inp["volumeInGb"] = 0
+    else:
+        print("[runpod_ctl] no network volume -> pod can land in ANY datacenter with the GPU; "
+              "data/checkpoints are EPHEMERAL (final model still backs up to HF).")
     if a.dry_run:
         masked = {**inp, "env": [{"key": e["key"], "value": ("***" if ("TOKEN" in e["key"] or "KEY" in e["key"]) else e["value"])}
                                  for e in inp["env"]]}

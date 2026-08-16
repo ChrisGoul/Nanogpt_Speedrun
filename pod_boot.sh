@@ -34,7 +34,7 @@ export DEADLINE_HOURS="${DEADLINE_HOURS:-3}"
 export RUN OUT_DIR="$OUT" DATA_DIR="$DATA"     # for save_results.py
 ARGS="${ARGS:---dim 1024 --layers 22 --heads 16 --seq 1024 --batch-size 64 --steps 8000 --eval-every 500 --bench-every 2000 --bench-n 200 --ckpt-every 1000}"
 
-cd "$WORK" || { echo "[boot] no /workspace — attach a network volume there"; exit 1; }
+mkdir -p "$WORK"; cd "$WORK" || { echo "[boot] cannot use $WORK"; exit 1; }
 
 # 1. code: clone once, else fast-forward to latest
 if [ -d nanogpt/.git ]; then
