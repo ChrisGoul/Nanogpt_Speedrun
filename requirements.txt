@@ -1,0 +1,10 @@
+# Cloud pod dependencies for nanogpt_speedrun.
+# On a RunPod PyTorch template, torch is preinstalled — installing it here is a
+# no-op / upgrade. Everything else is what the prepare_*/train/serve scripts need.
+torch>=2.4          # gives torch.compile (Triton) + FlashAttention on Linux
+numpy
+tokenizers         # byte-level BPE (prepare_mix.py, train.py)
+tiktoken           # GPT-2 fallback tokenizer
+huggingface_hub    # dataset/shard downloads
+datasets           # SFT sources (dolly, gsm8k, etc.)
+pyarrow            # parquet reads in the prepare_* scripts

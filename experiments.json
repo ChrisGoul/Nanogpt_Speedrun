@@ -1,0 +1,121 @@
+[
+  {
+    "name": "FineWeb (undertrained)",
+    "setup": "50M, ~8M tokens, 1000 steps",
+    "result": "val loss ~5.7, structured gibberish",
+    "mask": "none — loss on all tokens (next-token)",
+    "takeaway": "Failure was undertraining, not model size."
+  },
+  {
+    "name": "Blend pretrain",
+    "setup": "33.6M, TinyStories+SimpleWiki, ~340M tok, 8K vocab",
+    "result": "val loss 1.54, coherent children's stories",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Small WORLD lets a tiny model write fluently."
+  },
+  {
+    "name": "Blend SFT (Q&A)",
+    "setup": "fine-tune of blend, instruction+wiki-QA",
+    "result": "answers in correct shape, facts confabulated",
+    "mask": "prompt masked; loss on answer tokens only",
+    "takeaway": "Format is cheap to learn; knowledge doesn't fit."
+  },
+  {
+    "name": "Books pretrain",
+    "setup": "42M, BookCorpus 99.5M tok, 16K vocab",
+    "result": "val loss 2.77, fluent adult prose",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Broad language backbone; near-zero reliable facts."
+  },
+  {
+    "name": "RAFT reader",
+    "setup": "42M, SQuAD read-cite-or-abstain, BM25 index",
+    "result": "val loss 0.22, but extraction unreliable",
+    "mask": "context+question masked; loss on answer/citation span",
+    "takeaway": "Architecture sound; 42M too weak to extract reliably."
+  },
+  {
+    "name": "Vocab A/B — raw",
+    "setup": "50M, raw FineWeb, 200M tok (control)",
+    "result": "ppl 31.06 | PIQA 58.5 ARC-E 32.3 HSwag 34.0 LAMB 19.8",
+    "mask": "none — loss on all tokens",
+    "takeaway": "~Pythia-70M class at 1500x fewer tokens."
+  },
+  {
+    "name": "Vocab A/B — filtered",
+    "setup": "50M, vocab-filtered FineWeb, 200M tok",
+    "result": "ppl 35.22 on raw (worse) | PIQA 56.0 ARC-E 28.5",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Vocab filtering HURT: filters words, not world."
+  },
+  {
+    "name": "MoE throughput test",
+    "setup": "MoE-4/-8 vs dense, iso-FLOP",
+    "result": "2-4.5x slower wall-clock; no speedup",
+    "mask": "none — loss on all tokens",
+    "takeaway": "MoE is a large-scale technique; no payoff at 50M."
+  },
+  {
+    "name": "Throughput ceiling",
+    "setup": "torch.compile + batch-size sweep, 50M",
+    "result": "19k tok/s @ batch 32; compile fails (no Triton on Windows); batch 64 spills to RAM (10x slower)",
+    "mask": "n/a — throughput test (no training signal)",
+    "takeaway": "Already at HW ceiling; no free throughput win on Windows/8GB."
+  },
+  {
+    "name": "LR sweep (0.5/1/2x)",
+    "setup": "50M, ab_raw, 60M tok, only LR differs",
+    "result": "val loss 3.672 / 3.683 / 3.710 (lower LR slightly better); benchmarks within noise",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Default LR near-optimal; not a lever. Use ppl not benchmarks for small tweaks."
+  },
+  {
+    "name": "FineWeb-Edu A/B",
+    "setup": "50M, FineWeb-Edu vs raw, 200M tok, same-run n=500",
+    "result": "ARC-E +2.4, but PIQA -3.6, HellaSwag -2.4, LAMBADA -4.8 vs raw",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Net LOSS at 50M: edu specializes toward reasoning, costs narrative/commonsense. Quality-data benchmark gains need scale."
+  },
+  {
+    "name": "Gradient checkpointing",
+    "setup": "fit-test, batch 32, Muon+Adam",
+    "result": "50M: 7.9->2.8GB (activations were ~5GB); enables 168M @ 4.7GB (was 16.7GB/spill). Ceiling ~168M.",
+    "mask": "n/a — memory fit-test",
+    "takeaway": "Activations are the memory wall; checkpointing ~3.4x's trainable size. New limit = optimizer state."
+  },
+  {
+    "name": "168M vs 50M (params lever)",
+    "setup": "168M ckpt vs 50M, both 60M tok, iso-data",
+    "result": "val 3.583 vs 3.683 (-0.10); PIQA +3, HellaSwag +2.25, LAMBADA +2.75, ARC-E -2.75",
+    "mask": "none — loss on all tokens",
+    "takeaway": "FIRST positive lever: loss down + 3/4 benchmarks up. Params move the needle where data tricks didn't. Costs 3x wall-clock, still undertrained."
+  },
+  {
+    "name": "Reasoning+logic model",
+    "setup": "151M, char-level, 200M tok synthetic CoT (13 types: arithmetic + logic)",
+    "result": "100% on 2600 fresh held-out problems (incl. transitive, syllogism, boolean, modus ponens)",
+    "mask": "none — loss on all tokens (problem + chain-of-thought)",
+    "takeaway": "Perfect IN-DISTRIBUTION mastery. But see generalization tests below."
+  },
+  {
+    "name": "Generalization tests",
+    "setup": "reason168 on out-of-distribution: 4+ digits, GSM8K phrasing",
+    "result": "4-digit arithmetic 0% (trained on <=3), GSM8K 0.5%. Hard cliff.",
+    "mask": "n/a — evaluation only",
+    "takeaway": "The 100% was PATTERN-MATCHING, not reasoning. Generalizes 0 steps beyond training distribution. Real reasoning = generalization = needs scale."
+  },
+  {
+    "name": "mix16 pretrain",
+    "setup": "156M, FineWeb-Edu+Cosmopedia+CoT, 16K tied vocab, ~0.8B tok (2 epochs)",
+    "result": "val loss 3.15 (ppl ~23) | PIQA ~59, HellaSwag ~40 (base, acc_norm)",
+    "mask": "none — loss on all tokens",
+    "takeaway": "Beats GPT-2-small on HellaSwag at ~50x fewer tokens (data+arch); PIQA lags — knowledge tracks tokens. 16K vocab freed VRAM, ~2.5x throughput vs 32K."
+  },
+  {
+    "name": "mix16 SFT",
+    "setup": "156M SFT, dialogue+Dolly+GSM8K(x2)+CSQA+SQuAD, 107k examples, seq 512",
+    "result": "learns format + stopping by ~step 1000; facts confabulated (Paris ok, 'capital=Toulouse' not); loss plateaus ~1.95",
+    "mask": "prompt masked; loss on assistant turns only (8% of tokens)",
+    "takeaway": "SFT teaches behavior/format, not knowledge. Could've run 2k steps not 6k. High-variance samples; capacity ceiling unchanged."
+  }
+]

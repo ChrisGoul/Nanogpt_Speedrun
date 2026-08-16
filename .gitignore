@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Tokenized datasets & trained models — regenerable via prepare_*.py / train*.py
+*.bin
+*.pt
+*/tokenizer.json
+*/loss_mask.bin
+*/tokens.bin
+
+# Data / model output directories (regenerable, multi-GB — never commit)
+mix/
+mix16/
+smoke_mix/
+blend/
+books/
+sft/
+sft16/
+sftmix/
+chat/
+chatmodel/
+reason/
+reason168/
+addsub/
+simplewiki/
+raft/
+raftmodel/
+ab_raw/
+ab_edu/
+ab_filtered/
+lr_0.5/
+lr_1.0/
+lr_2.0/
+ckpt168/
+evalsuite/
+abl/
+big300/
+big300b/
+
+# Live metrics + run logs
+metrics.jsonl
+metrics_*.jsonl
+*.log
+
+# Large local inputs
+input.txt
+
+# Secrets — never commit
+*.pem
+*.key
+id_ed25519*
+.env

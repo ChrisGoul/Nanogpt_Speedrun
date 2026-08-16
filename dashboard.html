@@ -1,0 +1,501 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>nanoGPT speedrun — live training</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --series-1: #2a78d6; --series-2: #eb6834;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5; --series-2: #d95926;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page); color: var(--text-primary);
+    padding: 20px; max-width: 960px; margin: 0 auto;
+  }
+  h1 { font-size: 17px; font-weight: 600; margin-bottom: 2px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .label { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
+  .tile .value { font-size: 22px; font-weight: 600; }
+  .tile .value small { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
+  .card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; position: relative; }
+  .card h2 { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 4px 0 6px; }
+  .legend .swatch { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px; }
+  svg { display: block; width: 100%; }
+  .bar-wrap { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .bar { height: 100%; background: var(--series-1); border-radius: 3px; width: 0%; transition: width .5s; }
+  #tooltip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.15);
+    white-space: nowrap; z-index: 10;
+  }
+  .sample-row { border-top: 1px solid var(--grid); padding: 10px 0; }
+  .sample-row:first-child { border-top: none; }
+  .sample-step { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  .sample-text { white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; overflow-wrap: anywhere; }
+  .sample-text b { color: var(--text-primary); }
+  #status { font-size: 12px; color: var(--muted); }
+  .chat-controls { display: flex; align-items: center; gap: 14px; margin: 6px 0 2px; font-size: 12px; color: var(--text-secondary); }
+  .chat-controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  #chat-new { padding: 4px 12px; font-size: 12px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--page); color: var(--text-secondary); cursor: pointer; }
+  #chat-new:hover { border-color: var(--series-1); color: var(--text-primary); }
+  .chat-input { display: flex; gap: 8px; margin-top: 10px; }
+  #chat-box { flex: 1; padding: 9px 12px; font-size: 13px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--page); color: var(--text-primary); }
+  #chat-box:focus { outline: none; border-color: var(--series-1); }
+  #chat-send { padding: 9px 18px; font-size: 13px; font-weight: 600; border: none; border-radius: 8px;
+    background: var(--series-1); color: #fff; cursor: pointer; }
+  #chat-send:disabled { opacity: .5; cursor: default; }
+  #chat-log { display: flex; flex-direction: column; gap: 8px; }
+  #chat-log:empty { display: none; }
+  .msg { padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; max-width: 85%; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.you { align-self: flex-end; background: var(--series-1); color: #fff; }
+  .msg.bot { align-self: flex-start; background: var(--page); border: 1px solid var(--border); color: var(--text-primary); }
+  .msg.bot.pending { color: var(--muted); font-style: italic; }
+  .sources { align-self: flex-start; max-width: 85%; font-size: 11.5px; color: var(--muted); }
+  .sources summary { cursor: pointer; padding: 2px 0; }
+  .sources div { padding: 5px 8px; margin-top: 4px; border-left: 2px solid var(--border); line-height: 1.45; }
+</style>
+</head>
+<body>
+<h1>nanoGPT speedrun — live training</h1>
+<div class="sub" id="meta">waiting for metrics.jsonl…</div>
+
+<div class="card" id="exp-card">
+  <h2>Experiments log <span style="font-weight:400;color:var(--muted)">— what we've tried and learned</span></h2>
+  <div style="overflow-x:auto">
+    <table id="exp-table" style="width:100%;border-collapse:collapse;font-size:12.5px">
+      <thead><tr>
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)">Experiment</th>
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)">Setup</th>
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)">Loss mask</th>
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)">Result</th>
+        <th style="text-align:left;padding:6px 8px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)">Takeaway</th>
+      </tr></thead>
+      <tbody id="exp-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card" id="chat-card">
+  <h2>Chat with the bot <span style="font-weight:400;color:var(--muted)" id="chat-status"></span></h2>
+  <div class="chat-controls">
+    <label title="Send only your current question, with no prior turns — avoids the context-bleed a 156M model suffers from">
+      <input id="chat-single" type="checkbox" checked> single-turn (no history)
+    </label>
+    <button id="chat-new" type="button">New chat</button>
+  </div>
+  <div id="chat-log"></div>
+  <div class="chat-input">
+    <input id="chat-box" type="text" placeholder="Ask the mix16 bot something — simple questions work best (156M, fluent but shaky on facts)" autocomplete="off">
+    <button id="chat-send">Send</button>
+  </div>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="label">Progress</div><div class="value" id="t-step">–</div><div class="bar-wrap"><div class="bar" id="t-bar"></div></div></div>
+  <div class="tile"><div class="label">Val loss</div><div class="value" id="t-val">–</div></div>
+  <div class="tile"><div class="label">Train loss</div><div class="value" id="t-train">–</div></div>
+  <div class="tile"><div class="label">Throughput</div><div class="value" id="t-tok">–</div></div>
+  <div class="tile"><div class="label">MFU</div><div class="value" id="t-mfu">–</div></div>
+  <div class="tile"><div class="label">Peak VRAM</div><div class="value" id="t-mem">–</div></div>
+  <div class="tile"><div class="label">Grad norm</div><div class="value" id="t-gn">–</div></div>
+  <div class="tile"><div class="label">Elapsed</div><div class="value" id="t-time">–</div></div>
+</div>
+
+<div class="card">
+  <h2>Loss</h2>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--series-1)"></span>train</span>
+    <span><span class="swatch" style="background:var(--series-2)"></span>val</span>
+  </div>
+  <svg id="loss-chart" viewBox="0 0 900 300" height="300"></svg>
+  <div id="tooltip"></div>
+</div>
+
+<div class="card">
+  <h2>Learning-rate multiplier <span style="font-weight:400;color:var(--muted)">(trapezoidal schedule)</span></h2>
+  <svg id="lr-chart" viewBox="0 0 900 110" height="110"></svg>
+</div>
+
+<div class="card" id="compute-card" style="display:none">
+  <h2>Gradient norm <span style="font-weight:400;color:var(--muted)">— training stability (spikes = instability); MFU / VRAM in the tiles above</span></h2>
+  <svg id="gn-chart" viewBox="0 0 900 200" height="200"></svg>
+</div>
+
+<div class="card" id="bench-card" style="display:none">
+  <h2>Live benchmarks <span style="font-weight:400;color:var(--muted)">— capability during pretraining (acc_norm, chance ~25–50%)</span></h2>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--series-1)"></span>PIQA</span>
+    <span><span class="swatch" style="background:var(--series-2)"></span>HellaSwag</span>
+  </div>
+  <svg id="bench-chart" viewBox="0 0 900 240" height="240"></svg>
+</div>
+
+<div class="card" id="ab-card" style="display:none">
+  <h2>A/B comparison <span style="font-weight:400;color:var(--muted)">— 50M vs 168M (checkpointed), same data & 60M tokens</span></h2>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--series-1)"></span>50M</span>
+    <span><span class="swatch" style="background:var(--series-2)"></span>168M (gradient checkpointing)</span>
+  </div>
+  <svg id="ab-chart" viewBox="0 0 900 260" height="260"></svg>
+  <div id="ab-note" style="font-size:12px;color:var(--muted);margin-top:6px"></div>
+</div>
+
+<div class="card" id="samples-card" style="display:none">
+  <h2>Model outputs over time <span style="font-weight:400;color:var(--muted)" id="prompt-note">(newest first)</span></h2>
+  <div id="samples"></div>
+</div>
+
+<div id="status"></div>
+
+<script>
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let train = [], val = [], meta = null, done = null;
+
+function fmtTime(s) {
+  if (s == null) return "–";
+  return s < 60 ? s.toFixed(0) + "s" : Math.floor(s/60) + "m " + Math.round(s%60) + "s";
+}
+
+function scale(vals, lo, hi) { return v => lo + (hi - lo) * v; }
+
+function drawLoss() {
+  const svg = document.getElementById("loss-chart");
+  const W = 900, H = 300, m = {l: 46, r: 12, t: 8, b: 24};
+  const pts = train.concat(val);
+  if (pts.length < 2) return;
+  const maxStep = meta ? meta.num_steps : Math.max(...pts.map(p => p.step));
+  const losses = pts.map(p => p.train_loss ?? p.val_loss);
+  const yMin = Math.min(...losses), yMax = Math.max(...losses);
+  const pad = (yMax - yMin) * 0.05 + 1e-6;
+  const x = s => m.l + (W - m.l - m.r) * s / maxStep;
+  const y = v => H - m.b - (H - m.t - m.b) * (v - (yMin - pad)) / (yMax - yMin + 2 * pad);
+
+  let g = "";
+  // gridlines + y ticks
+  const nTicks = 5;
+  for (let i = 0; i <= nTicks; i++) {
+    const v = yMin - pad + (yMax - yMin + 2 * pad) * i / nTicks;
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/>`;
+    g += `<text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${v.toFixed(2)}</text>`;
+  }
+  // x ticks
+  for (let s = 0; s <= maxStep; s += Math.max(100, Math.ceil(maxStep / 10 / 100) * 100)) {
+    g += `<text x="${x(s)}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)">${s}</text>`;
+  }
+  g += `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--baseline)" stroke-width="1"/>`;
+
+  const path = (data, key) => data.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + "," + y(p[key]).toFixed(1)).join("");
+  if (train.length > 1) g += `<path d="${path(train, "train_loss")}" fill="none" stroke="var(--series-1)" stroke-width="2"/>`;
+  if (val.length > 1) g += `<path d="${path(val, "val_loss")}" fill="none" stroke="var(--series-2)" stroke-width="2"/>`;
+  for (const p of val)
+    g += `<circle cx="${x(p.step)}" cy="${y(p.val_loss)}" r="4" fill="var(--series-2)" stroke="var(--surface-1)" stroke-width="2"/>`;
+  // direct labels at line ends
+  if (train.length > 1) {
+    const last = train[train.length - 1];
+    g += `<text x="${x(last.step) + 6}" y="${y(last.train_loss) + 4}" font-size="11" fill="var(--text-secondary)">train</text>`;
+  }
+  g += `<g id="crosshair" style="display:none"><line y1="${m.t}" y2="${H - m.b}" stroke="var(--baseline)" stroke-width="1" stroke-dasharray="3 3"/></g>`;
+  g += `<rect id="hover-zone" x="${m.l}" y="${m.t}" width="${W - m.l - m.r}" height="${H - m.t - m.b}" fill="transparent"/>`;
+  svg.innerHTML = g;
+
+  const tip = document.getElementById("tooltip");
+  const zone = svg.querySelector("#hover-zone");
+  const cross = svg.querySelector("#crosshair");
+  zone.onmousemove = e => {
+    const r = svg.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * W / r.width;
+    const step = (sx - m.l) / (W - m.l - m.r) * maxStep;
+    const near = train.reduce((a, p) => Math.abs(p.step - step) < Math.abs(a.step - step) ? p : a, train[0]);
+    if (!near) return;
+    cross.style.display = "";
+    cross.querySelector("line").setAttribute("x1", x(near.step));
+    cross.querySelector("line").setAttribute("x2", x(near.step));
+    const nearVal = val.filter(v => v.step <= near.step).pop();
+    tip.style.display = "block";
+    tip.innerHTML = `<b>step ${near.step}</b><br>train ${near.train_loss.toFixed(3)}` +
+      (nearVal ? `<br>val ${nearVal.val_loss.toFixed(3)} <span style="color:var(--muted)">(@${nearVal.step})</span>` : "");
+    const card = svg.closest(".card").getBoundingClientRect();
+    tip.style.left = Math.min(e.clientX - card.left + 14, card.width - 150) + "px";
+    tip.style.top = (e.clientY - card.top - 10) + "px";
+  };
+  zone.onmouseleave = () => { tip.style.display = "none"; cross.style.display = "none"; };
+}
+
+function drawBench(bench) {
+  const svg = document.getElementById("bench-chart");
+  const W = 900, H = 240, m = {l: 40, r: 14, t: 10, b: 26};
+  if (bench.length < 1) return;
+  const maxStep = (meta ? meta.num_steps : Math.max(...bench.map(p => p.step))) || 1;
+  const x = s => m.l + (W - m.l - m.r) * s / maxStep;
+  const y = v => H - m.b - (H - m.t - m.b) * v / 100;   // 0–100%
+  let g = "";
+  for (let v = 0; v <= 100; v += 25) {
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    g += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}%</text>`;
+  }
+  const line = (key, col) => {
+    const pts = bench.filter(p => p[key] != null);
+    if (pts.length < 1) return "";
+    let d = pts.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + "," + y(p[key]).toFixed(1)).join("");
+    let dots = pts.map(p => `<circle cx="${x(p.step)}" cy="${y(p[key])}" r="3" fill="${col}"/>`).join("");
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="2"/>` + dots;
+  };
+  g += line("piqa", "var(--series-1)") + line("hellaswag", "var(--series-2)");
+  svg.innerHTML = g;
+}
+
+function drawLR() {
+  const svg = document.getElementById("lr-chart");
+  const W = 900, H = 110, m = {l: 46, r: 12, t: 8, b: 20};
+  if (train.length < 2) return;
+  const maxStep = meta ? meta.num_steps : train[train.length - 1].step;
+  const x = s => m.l + (W - m.l - m.r) * s / maxStep;
+  const y = v => H - m.b - (H - m.t - m.b) * v;
+  let g = `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--baseline)"/>`;
+  g += `<text x="${m.l - 8}" y="${y(1) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">1.0</text>`;
+  g += `<text x="${m.l - 8}" y="${y(0) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">0</text>`;
+  g += `<path d="${train.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + "," + y(p.lr_mult).toFixed(1)).join("")}" fill="none" stroke="var(--series-1)" stroke-width="2"/>`;
+  svg.innerHTML = g;
+}
+
+function drawGradNorm() {
+  const svg = document.getElementById("gn-chart");
+  const pts = train.filter(p => p.grad_norm != null);
+  const W = 900, H = 200, m = {l: 46, r: 12, t: 10, b: 22};
+  if (pts.length < 2) return;
+  const maxStep = meta ? meta.num_steps : pts[pts.length - 1].step;
+  const maxGN = Math.max(...pts.map(p => p.grad_norm)) * 1.1 || 1;
+  const x = s => m.l + (W - m.l - m.r) * s / maxStep;
+  const y = v => H - m.b - (H - m.t - m.b) * v / maxGN;
+  let g = "";
+  for (let i = 0; i <= 2; i++) {
+    const v = maxGN * i / 2;
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    g += `<text x="${m.l - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${v.toFixed(1)}</text>`;
+  }
+  g += `<path d="${pts.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + "," + y(p.grad_norm).toFixed(1)).join("")}" fill="none" stroke="var(--series-1)" stroke-width="1.5"/>`;
+  svg.innerHTML = g;
+}
+
+async function poll() {
+  try {
+    const r = await fetch("metrics.jsonl?" + Date.now(), {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const lines = (await r.text()).trim().split("\n").filter(Boolean).map(JSON.parse);
+    train = lines.filter(l => l.event === "train");
+    val = lines.filter(l => l.event === "val");
+    meta = lines.find(l => l.event === "start") || meta;
+    done = lines.find(l => l.event === "done") || null;
+
+    if (meta) document.getElementById("meta").textContent =
+      `${meta.params_m}M params · ${meta.device} · batch ${meta.batch_size} × ${meta.block_size} tokens · ${meta.num_steps} steps`;
+    const lastT = train[train.length - 1], lastV = val[val.length - 1];
+    if (lastT) {
+      const pct = meta ? (lastT.step + 1) / meta.num_steps * 100 : 0;
+      document.getElementById("t-step").innerHTML = `${lastT.step}<small> / ${meta ? meta.num_steps : "?"}</small>`;
+      document.getElementById("t-bar").style.width = pct + "%";
+      document.getElementById("t-train").textContent = lastT.train_loss.toFixed(3);
+      document.getElementById("t-tok").innerHTML = (lastT.tok_per_s / 1000).toFixed(1) + "<small>k tok/s</small>";
+      document.getElementById("t-mfu").innerHTML = lastT.mfu != null ? lastT.mfu.toFixed(0) + "<small>%</small>" : "–";
+      document.getElementById("t-mem").innerHTML = lastT.gpu_mem_mb != null ? (lastT.gpu_mem_mb / 1000).toFixed(1) + "<small>GB</small>" : "–";
+      document.getElementById("t-gn").textContent = lastT.grad_norm != null ? lastT.grad_norm.toFixed(2) : "–";
+      document.getElementById("t-time").textContent = fmtTime((done || lastT).time_s);
+    }
+    if (lastV) document.getElementById("t-val").textContent = lastV.val_loss.toFixed(3);
+    drawLoss(); drawLR();
+    if (train.some(p => p.grad_norm != null)) { document.getElementById("compute-card").style.display = ""; drawGradNorm(); }
+
+    const bench = lines.filter(l => l.event === "bench");
+    if (bench.length) { document.getElementById("bench-card").style.display = ""; drawBench(bench); }
+
+    const samples = lines.filter(l => l.event === "sample");
+    if (done) samples.push({step: "final (200 tokens)", text: done.sample});
+    if (samples.length) {
+      document.getElementById("samples-card").style.display = "";
+      const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const prompt = (meta && meta.prompt) || "The meaning of life is";
+      document.getElementById("prompt-note").textContent = `(prompt: "${prompt}", newest first)`;
+      document.getElementById("samples").innerHTML = samples.slice().reverse().map(s => {
+        const t = esc(s.text);
+        const body = t.startsWith(prompt) ? `<b>${prompt}</b>` + t.slice(prompt.length) : t;
+        return `<div class="sample-row"><div class="sample-step">step ${s.step}</div><div class="sample-text">${body}</div></div>`;
+      }).join("");
+    }
+    if (done) {
+      document.getElementById("t-bar").style.width = "100%";
+      document.getElementById("status").textContent = "Training complete.";
+      return; // stop polling
+    }
+    document.getElementById("status").textContent = "live · polling every 2s";
+  } catch (e) {
+    document.getElementById("status").textContent = "waiting for training to start… (" + e.message + ")";
+  }
+  setTimeout(poll, 2000);
+}
+poll();
+
+// ---- experiments log ----
+(async function loadExperiments() {
+  try {
+    const r = await fetch("experiments.json?" + Date.now(), {cache: "no-store"});
+    if (!r.ok) return;
+    const rows = await r.json();
+    const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    document.getElementById("exp-body").innerHTML = rows.map(x =>
+      `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--grid);font-weight:600">${esc(x.name)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--grid);color:var(--text-secondary)">${esc(x.setup)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--grid);color:var(--text-secondary);font-size:11.5px">${esc(x.mask || "—")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--grid);color:var(--text-secondary);font-family:ui-monospace,Consolas,monospace;font-size:11.5px">${esc(x.result)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--grid)">${esc(x.takeaway)}</td>
+      </tr>`).join("");
+  } catch (e) { /* file may not exist */ }
+})();
+
+// ---- A/B comparison (overlays the two archived runs) ----
+async function loadRun(name) {
+  try {
+    const r = await fetch("metrics_" + name + ".jsonl?" + Date.now(), {cache: "no-store"});
+    if (!r.ok) return null;
+    const lines = (await r.text()).trim().split("\n").filter(Boolean).map(JSON.parse);
+    const val = lines.filter(l => l.event === "val");
+    return val.length ? val : null;
+  } catch (e) { return null; }
+}
+
+function drawAB(a, b) {
+  const svg = document.getElementById("ab-chart");
+  const W = 900, H = 260, m = {l: 50, r: 14, t: 10, b: 26};
+  const all = (a || []).concat(b || []);
+  if (all.length < 2) return;
+  const maxStep = Math.max(...all.map(p => p.step)) || 1;
+  const ys = all.map(p => p.val_loss);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const pad = (yMax - yMin) * 0.05 + 1e-6;
+  const x = s => m.l + (W - m.l - m.r) * s / maxStep;
+  const y = v => H - m.b - (H - m.t - m.b) * (v - (yMin - pad)) / (yMax - yMin + 2 * pad);
+  let g = "";
+  for (let i = 0; i <= 5; i++) {
+    const v = yMin - pad + (yMax - yMin + 2 * pad) * i / 5;
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/>`;
+    g += `<text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${v.toFixed(2)}</text>`;
+  }
+  g += `<line x1="${m.l}" x2="${W - m.r}" y1="${H - m.b}" y2="${H - m.b}" stroke="var(--baseline)"/>`;
+  const path = (d, col) => d && d.length > 1
+    ? `<path d="${d.map((p, i) => (i ? "L" : "M") + x(p.step).toFixed(1) + "," + y(p.val_loss).toFixed(1)).join("")}" fill="none" stroke="${col}" stroke-width="2"/>` : "";
+  g += path(a, "var(--series-1)") + path(b, "var(--series-2)");
+  svg.innerHTML = g;
+
+  const note = document.getElementById("ab-note");
+  if (a && b) {
+    const la = a[a.length - 1], lb = b[b.length - 1];
+    const d = (la.val_loss - lb.val_loss).toFixed(4);
+    note.textContent = `latest — 50M ${la.val_loss.toFixed(4)} (step ${la.step}) · 168M ${lb.val_loss.toFixed(4)} (step ${lb.step}) · diff ${d}` +
+      "  — same data, tokens & val set, so directly comparable. Does 3.4x the params help at equal tokens?";
+  } else {
+    note.textContent = a ? "raw run only so far" : "filtered run only so far";
+  }
+}
+
+async function pollAB() {
+  const a = await loadRun("lr_1.0"), b = await loadRun("ckpt168");
+  if (a || b) {
+    document.getElementById("ab-card").style.display = "";
+    drawAB(a, b);
+  }
+  setTimeout(pollAB, 5000);
+}
+pollAB();
+
+// ---- chat ----
+const box = document.getElementById("chat-box");
+const sendBtn = document.getElementById("chat-send");
+const logEl = document.getElementById("chat-log");
+const chatStatus = document.getElementById("chat-status");
+const singleTurn = document.getElementById("chat-single");
+const newChatBtn = document.getElementById("chat-new");
+let history = [];  // [{role, content}, ...] for multi-turn context
+
+newChatBtn.onclick = () => { history = []; logEl.innerHTML = ""; box.focus(); };
+
+function addMsg(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.textContent = text;
+  logEl.appendChild(d);
+  d.scrollIntoView({block: "nearest"});
+  return d;
+}
+
+async function send() {
+  const q = box.value.trim();
+  if (!q) return;
+  box.value = "";
+  box.disabled = sendBtn.disabled = true;
+  addMsg("you", q);
+  history.push({role: "user", content: q});
+  // single-turn mode: send only the current question so prior turns can't
+  // bleed into the answer (a 156M model can't keep turns separate)
+  const payload = singleTurn.checked ? [{role: "user", content: q}] : history;
+  const pending = addMsg("bot pending", "thinking…");
+  try {
+    const r = await fetch("/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({messages: payload}),
+    });
+    if (!r.ok) throw new Error("server " + r.status);
+    const data = await r.json();
+    pending.className = "msg bot";
+    pending.textContent = data.reply || "(empty reply)";
+    history.push({role: "assistant", content: data.reply || ""});
+    if (data.docs && data.docs.length) {
+      const d = document.createElement("details");
+      d.className = "sources";
+      d.innerHTML = "<summary>retrieved passages (" + data.docs.length + ")</summary>" +
+        data.docs.map((t, i) => {
+          const esc = String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+          return "<div><b>[" + (i + 1) + "]</b> " + esc + "</div>";
+        }).join("");
+      logEl.appendChild(d);
+      d.scrollIntoView({block: "nearest"});
+    }
+  } catch (e) {
+    pending.className = "msg bot";
+    pending.textContent = "⚠ " + e.message + " — is serve.py running? (plain http.server has no /chat endpoint)";
+  } finally {
+    box.disabled = sendBtn.disabled = false;
+    box.focus();
+  }
+}
+sendBtn.onclick = send;
+box.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+
+// detect whether the chat backend exists (cheap: 1-token generation)
+fetch("/chat", {method: "POST", headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({prompt: "hi", max_new: 1})})
+  .then(r => { chatStatus.textContent = r.ok ? "" : "(start serve.py to enable)"; })
+  .catch(() => { chatStatus.textContent = "(start serve.py to enable)"; });
+</script>
+</body>
+</html>
