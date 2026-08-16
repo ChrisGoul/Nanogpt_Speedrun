@@ -32,7 +32,7 @@ OUT="$WORK/$RUN"
 export GPU_PEAK="${GPU_PEAK:-312}"
 export DEADLINE_HOURS="${DEADLINE_HOURS:-3}"
 export RUN OUT_DIR="$OUT" DATA_DIR="$DATA"     # for save_results.py
-ARGS="${ARGS:---dim 1024 --layers 22 --heads 16 --seq 1024 --batch-size 64 --steps 8000 --eval-every 500 --bench-every 2000 --ckpt-every 1000}"
+ARGS="${ARGS:---dim 1024 --layers 22 --heads 16 --seq 1024 --batch-size 64 --steps 8000 --eval-every 500 --bench-every 2000 --bench-n 200 --ckpt-every 1000}"
 
 cd "$WORK" || { echo "[boot] no /workspace — attach a network volume there"; exit 1; }
 

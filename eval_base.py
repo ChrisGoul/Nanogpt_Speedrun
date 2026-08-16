@@ -19,6 +19,7 @@ Run:  python eval_base.py --models ab_raw ab_filtered
 """
 import argparse
 import os
+import random
 
 import numpy as np
 import pyarrow as pa
@@ -123,7 +124,9 @@ class BaseLM:
 def load_piqa(n):
     t = parquet_table("ybisk/piqa", "validation")
     g, s1, s2, lab = (t.column(c).to_pylist() for c in ("goal", "sol1", "sol2", "label"))
-    return [(g[i], [s1[i], s2[i]], int(lab[i])) for i in range(min(n, len(g)))]
+    items = [(g[i], [s1[i], s2[i]], int(lab[i])) for i in range(len(g))]
+    random.Random(1337).shuffle(items)          # seeded: representative sample, same set every eval
+    return items[:n]
 
 def load_arc_easy(n):
     t = parquet_table("allenai/ai2_arc", "test", must_contain="ARC-Easy")
@@ -141,7 +144,9 @@ def load_arc_easy(n):
 def load_hellaswag(n):
     t = parquet_table("Rowan/hellaswag", "validation")
     ctx, endings, lab = (t.column(c).to_pylist() for c in ("ctx", "endings", "label"))
-    return [(ctx[i], list(endings[i]), int(lab[i])) for i in range(min(n, len(ctx))) if str(lab[i]).isdigit()]
+    items = [(ctx[i], list(endings[i]), int(lab[i])) for i in range(len(ctx)) if str(lab[i]).isdigit()]
+    random.Random(1337).shuffle(items)          # seeded: representative sample, same set every eval
+    return items[:n]
 
 def load_lambada(n):
     # repo holds de/en/es/fr/it configs — take English only

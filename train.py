@@ -418,7 +418,7 @@ def main():
     ap.add_argument("--tie", action="store_true", help="tie input and output embeddings")
     ap.add_argument("--bench", action="store_true", help="run lightweight PIQA+HellaSwag during training (logged for the dashboard)")
     ap.add_argument("--bench-every", type=int, default=2000)
-    ap.add_argument("--bench-n", type=int, default=100)
+    ap.add_argument("--bench-n", type=int, default=200)
     ap.add_argument("--ckpt-every", type=int, default=2000, help="save resumable ckpt.pt every N steps (0=off)")
     ap.add_argument("--resume", action="store_true", help="resume from out_dir/ckpt.pt if present")
     ap.add_argument("--peak-tflops", type=float, default=0.0, help="GPU bf16 dense peak TFLOP/s for MFU (0=auto-detect)")
