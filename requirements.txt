@@ -8,4 +8,4 @@ tiktoken           # GPT-2 fallback tokenizer
 huggingface_hub    # dataset/shard downloads
 datasets           # SFT sources (dolly, gsm8k, etc.)
 pyarrow            # parquet reads in the prepare_* scripts
-runpod             # runpod_ctl.py — deploy/stop pods via API (only needed locally, not on the pod)
+# (runpod_ctl.py needs no extra deps — it uses stdlib urllib for the RunPod API)

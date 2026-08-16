@@ -1,46 +1,46 @@
 """
 runpod_ctl.py — deploy / list / stop RunPod pods from ONE command, so you can
-fire many training experiments without touching the RunPod UI.
+fire many training experiments without the RunPod UI.
 
-Each `run` deploys a pod that self-provisions via pod_boot.sh (clone -> build
-data -> train -> back up to HF -> stop itself). So the whole loop is:
+Dependency-free: uses only Python's standard library (urllib) to call RunPod's
+GraphQL API — nothing to pip install. Each `run` deploys a pod that
+self-provisions via pod_boot.sh (clone -> build data -> train -> back up to HF
+-> stop itself), so the whole loop is one command:
 
     python runpod_ctl.py run --name big500 --args "--dim 1280 --layers 24 ..."
 
-...and later the model shows up at huggingface.co/<HF_USER>/big500 with the pod
-already stopped.
-
 --- Setup (once) --------------------------------------------------------------
-    pip install runpod
-Create a LOCAL .env next to this file (it is gitignored — never commit; your
-GitHub repo is public). See .env.example:
-
-    RUNPOD_API_KEY=...          # RunPod -> Settings -> API Keys
-    NETWORK_VOLUME_ID=...       # RunPod -> Storage -> your volume -> its id
-    HF_TOKEN=hf_...             # HF write token (backs up the model)
+Create a LOCAL .env next to this file (gitignored — never commit; repo is
+public). See .env.example:
+    RUNPOD_API_KEY=...
+    NETWORK_VOLUME_ID=...
+    HF_TOKEN=hf_...
     HF_USER=chgoul3
     REPO_URL=https://github.com/ChrisGoul/Nanogpt_Speedrun
     IMAGE=runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
 
 --- Commands ------------------------------------------------------------------
-    python runpod_ctl.py gpus                 # list GPU type ids (to pick --gpu)
+    python runpod_ctl.py gpus                 # list GPU type ids (for --gpu)
     python runpod_ctl.py run --name big300b   # deploy + train (defaults = 300M A100)
-    python runpod_ctl.py list                 # running pods
+    python runpod_ctl.py list                 # your pods
     python runpod_ctl.py stop <pod_id>        # stop (ends GPU billing)
     python runpod_ctl.py terminate <pod_id>   # remove (also frees pod disk)
 
-Add --dry-run to `run` to preview the deploy (secrets masked) without spending.
+Add --dry-run to `run` to preview (secrets masked) without spending.
 
-NOTE: this only deploys/starts/stops pods and reads GPU/pod info — it never
-touches billing. Your prepaid balance + auto-recharge OFF is the hard cap.
-RunPod's SDK evolves; verify the FIRST deploy with `list` + the dashboard.
+Only deploys/starts/stops pods and reads GPU/pod info — never touches billing;
+your prepaid balance + auto-recharge OFF is the hard cap. RunPod's API evolves,
+so verify the FIRST deploy with `list` + the dashboard.
 """
 import argparse
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+API = "https://api.runpod.io/graphql"
 
 def load_env():
     p = os.path.join(HERE, ".env")
@@ -57,6 +57,26 @@ def need(k):
         sys.exit(f"[runpod_ctl] missing {k} — set it in .env (see this file's header / .env.example)")
     return v
 
+def gql(query, variables=None, tries=3):
+    key = need("RUNPOD_API_KEY")
+    body = {"query": query}
+    if variables is not None:
+        body["variables"] = variables
+    data = json.dumps(body).encode()
+    last = None
+    for _ in range(tries):                       # retry: your wifi is flaky
+        try:
+            req = urllib.request.Request(f"{API}?api_key={key}", data=data,
+                                         headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=60) as r:
+                out = json.loads(r.read())
+            if out.get("errors"):
+                sys.exit("[runpod_ctl] API error:\n" + json.dumps(out["errors"], indent=2))
+            return out["data"]
+        except (urllib.error.URLError, TimeoutError) as e:
+            last = e
+    sys.exit(f"[runpod_ctl] network error after {tries} tries: {last}")
+
 def main():
     load_env()
     ap = argparse.ArgumentParser()
@@ -66,9 +86,9 @@ def main():
     r = sub.add_parser("run", help="deploy a self-training pod")
     r.add_argument("--name", required=True, help="run name -> HF repo + output dir")
     r.add_argument("--gpu", default="NVIDIA A100 80GB PCIe", help="gpu type id (see `gpus`)")
-    r.add_argument("--peak", type=int, default=312, help="GPU bf16 peak TFLOP/s for MFU (A100 312 / H100 756)")
+    r.add_argument("--peak", type=int, default=312, help="GPU bf16 peak TFLOP/s (A100 312 / H100 756)")
     r.add_argument("--deadline", type=int, default=3, help="hard auto-stop after N hours")
-    r.add_argument("--args", default="", help="ARGS override passed to pod_boot/train.py (quoted)")
+    r.add_argument("--args", default="", help="ARGS override for pod_boot/train.py (quoted)")
     r.add_argument("--cloud", default="COMMUNITY", help="COMMUNITY (cheap) or SECURE")
     r.add_argument("--disk", type=int, default=40, help="container disk GB")
     r.add_argument("--dry-run", action="store_true")
@@ -76,18 +96,13 @@ def main():
     tm = sub.add_parser("terminate"); tm.add_argument("pod_id")
     a = ap.parse_args()
 
-    try:
-        import runpod
-    except ImportError:
-        sys.exit("[runpod_ctl] `pip install runpod` first")
-    runpod.api_key = need("RUNPOD_API_KEY")
-
     if a.cmd == "gpus":
-        for g in runpod.get_gpus():
-            print(f"{str(g.get('id')):36} {g.get('memoryInGb','?')}GB")
+        for g in gql("query{gpuTypes{id displayName memoryInGb}}")["gpuTypes"]:
+            print(f"{str(g.get('id')):34} {g.get('memoryInGb','?')}GB  {g.get('displayName','')}")
         return
     if a.cmd == "list":
-        pods = runpod.get_pods() or []
+        pods = (gql("query{myself{pods{id name desiredStatus machine{gpuDisplayName}}}}")
+                .get("myself", {}).get("pods") or [])
         if not pods:
             print("(no pods)")
         for p in pods:
@@ -95,9 +110,9 @@ def main():
             print(f"{p.get('id')}  {p.get('name')}  {p.get('desiredStatus')}  {gpu}")
         return
     if a.cmd == "stop":
-        print(runpod.stop_pod(a.pod_id)); return
+        print(gql('mutation($id:String!){podStop(input:{podId:$id}){id desiredStatus}}', {"id": a.pod_id})); return
     if a.cmd == "terminate":
-        print(runpod.terminate_pod(a.pod_id)); return
+        print(gql('mutation($id:String!){podTerminate(input:{podId:$id})}', {"id": a.pod_id})); return
 
     # --- run: deploy a pod that trains itself and stops ---
     repo = os.environ.get("REPO_URL", "https://github.com/ChrisGoul/Nanogpt_Speedrun")
@@ -112,28 +127,32 @@ def main():
     }
     if a.args:
         env["ARGS"] = a.args
-    cfg = dict(
-        name=f"train-{a.name}",
-        image_name=os.environ.get("IMAGE", "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"),
-        gpu_type_id=a.gpu,
-        cloud_type=a.cloud,
-        gpu_count=1,
-        network_volume_id=need("NETWORK_VOLUME_ID"),
-        volume_mount_path="/workspace",
-        container_disk_in_gb=a.disk,
-        docker_args=start_cmd,
-        env=env,
-    )
+    inp = {
+        "cloudType": a.cloud,
+        "gpuTypeId": a.gpu,
+        "gpuCount": 1,
+        "name": f"train-{a.name}",
+        "imageName": os.environ.get("IMAGE", "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"),
+        "containerDiskInGb": a.disk,
+        "volumeInGb": 0,                                  # 0: using a NETWORK volume
+        "volumeMountPath": "/workspace",
+        "networkVolumeId": need("NETWORK_VOLUME_ID"),
+        "dockerArgs": start_cmd,
+        "ports": "22/tcp",
+        "env": [{"key": k, "value": v} for k, v in env.items()],
+    }
     if a.dry_run:
-        masked = {**cfg, "env": {k: ("***" if ("TOKEN" in k or "KEY" in k) else v) for k, v in env.items()}}
-        print("[runpod_ctl] DRY RUN — would create_pod with:")
+        masked = {**inp, "env": [{"key": e["key"], "value": ("***" if ("TOKEN" in e["key"] or "KEY" in e["key"]) else e["value"])}
+                                 for e in inp["env"]]}
+        print("[runpod_ctl] DRY RUN — would podFindAndDeployOnDemand with:")
         print(json.dumps(masked, indent=2))
         return
-    pod = runpod.create_pod(**cfg)
-    pid = pod.get("id") if isinstance(pod, dict) else pod
-    print(f"[runpod_ctl] deployed pod {pid} — training '{a.name}'.")
+    mut = ("mutation Deploy($input: PodFindAndDeployOnDemandInput!){"
+           "podFindAndDeployOnDemand(input:$input){id imageName machineId}}")
+    pod = gql(mut, {"input": inp})["podFindAndDeployOnDemand"]
+    print(f"[runpod_ctl] deployed pod {pod.get('id')} — training '{a.name}'.")
     print(f"    model will appear at: https://huggingface.co/{env['HF_REPO']}")
-    print(f"    stop early with: python runpod_ctl.py stop {pid}")
+    print(f"    stop early with: python runpod_ctl.py stop {pod.get('id')}")
 
 if __name__ == "__main__":
     main()
