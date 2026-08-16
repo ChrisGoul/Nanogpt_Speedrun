@@ -24,6 +24,11 @@ DEADLINE_HOURS="${DEADLINE_HOURS:-0}"
 stop_pod() {
   local rc=$?
   echo "[autostop] run exited (code $rc) — stopping pod so billing ends" >&2
+  # Optional: save/back up results BEFORE the pod dies (e.g. push model to HF).
+  if [ -n "${PRESTOP_CMD:-}" ]; then
+    echo "[autostop] running PRESTOP_CMD to save results..." >&2
+    bash -c "$PRESTOP_CMD" >&2 || echo "[autostop] PRESTOP_CMD failed (non-fatal)" >&2
+  fi
   if [ -z "${RUNPOD_POD_ID:-}" ]; then
     echo "[autostop] !! RUNPOD_POD_ID unset — cannot self-stop. STOP THE POD MANUALLY." >&2
     return

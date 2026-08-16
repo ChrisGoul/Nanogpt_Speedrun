@@ -241,6 +241,34 @@ then relaunch with `--data /workspace/data/mix300 --seq 1024 --steps <6e9/(batch
 
 ---
 
+## 4e. Fully hands-off runs (`pod_boot.sh`)
+
+`pod_boot.sh` collapses the whole manual dance into one automated flow: **clone/update
+repo → build data (once, if missing) → train → back up results → stop the pod.**
+
+Two ways to use it:
+- **Zero-touch:** paste `pod_boot.sh`'s contents (or `bash -c "cd /workspace && git clone <repo> nanogpt && bash nanogpt/pod_boot.sh"`) as the pod's **Docker/Start Command** when you deploy. Deploy the pod and walk away — it provisions, trains, and stops itself.
+- **One command after SSH:** `bash pod_boot.sh`.
+
+Config is all env vars (defaults train the 300M A100 config):
+```bash
+RUN=big300b GPU_PEAK=312 DEADLINE_HOURS=3 \
+  HF_TOKEN=hf_xxx HF_REPO=chrisgoul/nanogpt-big300b \
+  bash pod_boot.sh
+```
+- **`HF_TOKEN`/`HF_REPO`** (optional): the finished `model.pt` + metrics + tokenizer
+  are pushed to a **private HF repo** just before the pod stops — so you retrieve them
+  later with `huggingface-cli download`, **no pod and no scp needed**. This is the fix
+  for the "getting the model back is a pain" problem.
+- Requires the **network volume at `/workspace`** (data + checkpoints + results persist).
+- **It only starts training + stops the pod — never touches billing.** Your prepaid
+  balance with **auto-recharge OFF** is the hard cost ceiling.
+
+The one step it can't do for you is *creating* the pod (that needs the RunPod UI or an
+API call with your key). Everything after "Deploy" is automatic.
+
+---
+
 ## 5. Sizing a 500M / 1B config
 
 Rough param budget (use `param_config.py` to tune): `params ≈ 12·d²·L + vocab·d`.

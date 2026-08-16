@@ -52,3 +52,6 @@ input.txt
 *.key
 id_ed25519*
 .env
+
+# Nested clone (mistake) — do not track
+/Nanogpt_Speedrun/
