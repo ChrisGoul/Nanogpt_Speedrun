@@ -465,18 +465,25 @@ def main():
 
     if args.compile:
         orig = model
+        import torch._dynamo
+        torch._dynamo.config.cache_size_limit = 64   # tolerate a few shapes without thrashing
         try:
             model = torch.compile(model)
             # compilation is lazy (happens on first forward) — trigger it now with
-            # a tiny warmup so a broken backend (e.g. no Triton) fails HERE and we
-            # fall back, instead of crashing mid-training-loop and wasting the run.
-            _wu = torch.zeros((1, min(16, cfg.block_size)), dtype=torch.long, device=device)
+            # a warmup at the REAL training shape so a broken backend (e.g. no Triton)
+            # fails HERE and we fall back, instead of crashing mid-loop.
+            _wu = torch.zeros((batch_size, cfg.block_size), dtype=torch.long, device=device)
             with torch.autocast(device, dtype=torch.bfloat16):
                 model(_wu)
             print("torch.compile enabled")
         except Exception as e:
             model = orig
             print(f"torch.compile unavailable ({type(e).__name__}); continuing uncompiled", flush=True)
+    # eval / generate / bench run on the UNCOMPILED module: their variable-length,
+    # no_grad inputs (200 bench items, growing generate lengths) would otherwise
+    # thrash torch.compile's cache and stall startup. Only the fixed-shape training
+    # forward uses the compiled `model`.
+    eval_model = model._orig_mod if hasattr(model, "_orig_mod") else model
 
     # Split params: Muon for 2D hidden matrices, Adam for embedding + head.
     hidden = [p for p in model.blocks.parameters() if p.ndim == 2]
@@ -555,22 +562,22 @@ def main():
     for step in range(start_step, num_steps):
         # evaluation + sample generation
         if step % eval_every == 0 or step == num_steps - 1:
-            model.eval()
+            eval_model.eval()
             with torch.no_grad():
                 losses = []
                 for _ in range(20):
                     x, y = get_batch(data_dir, "val", batch_size, cfg.block_size, device)
                     with torch.autocast(device, dtype=torch.bfloat16):
-                        _, loss = model(x, y)
+                        _, loss = eval_model(x, y)
                     losses.append(loss.item())
-                out = model.generate(prompt_ids.clone(), max_new_tokens=64)
+                out = eval_model.generate(prompt_ids.clone(), max_new_tokens=64)
             sample = decode(out[0].tolist())
             print(f"step {step:4d} | val loss {np.mean(losses):.4f} | {time.time()-t0:.1f}s")
             log(event="val", step=step, val_loss=round(float(np.mean(losses)), 4),
                 time_s=round(time.time() - t0, 1))
             log(event="sample", step=step, text=sample)
             if bench_items and (step % args.bench_every == 0 or step == num_steps - 1):
-                scores = {k: bench_acc(model, encode, v, device, cfg.block_size) for k, v in bench_items.items()}
+                scores = {k: bench_acc(eval_model, encode, v, device, cfg.block_size) for k, v in bench_items.items()}
                 print("  bench: " + "  ".join(f"{k} {s}%" for k, s in scores.items()), flush=True)
                 log(event="bench", step=step, **scores)
             model.train()
@@ -623,8 +630,8 @@ def main():
     print(f"saved {out_dir}/model.pt")
 
     # final, longer sample from the model
-    model.eval()
-    out = model.generate(prompt_ids.clone(), max_new_tokens=200)
+    eval_model.eval()
+    out = eval_model.generate(prompt_ids.clone(), max_new_tokens=200)
     sample = decode(out[0].tolist())
     print("\n--- sample ---")
     print(sample)
