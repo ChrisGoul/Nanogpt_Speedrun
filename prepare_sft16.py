@@ -29,8 +29,11 @@ from prepare_sftmix import (dialogue_convs, dolly_pairs, gsm8k_pairs,
                             commonsenseqa_pairs, squad_pairs)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "mix16")
-OUT = os.path.join(HERE, "sft16")
+# SFT_TOK dir supplies the tokenizer (must match the base model you'll fine-tune);
+# SFT_OUT is where the tokenized instruction data lands. Defaults reproduce the
+# original mix16 -> sft16 build; override for other models (e.g. big300c).
+SRC = os.path.join(HERE, os.environ.get("SFT_TOK", "mix16"))
+OUT = os.path.join(HERE, os.environ.get("SFT_OUT", "sft16"))
 os.makedirs(OUT, exist_ok=True)
 SEQ_LEN = 512
 

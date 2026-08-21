@@ -20,21 +20,24 @@ from train import GPT, Config
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 class Bot:
-    def __init__(self, model_dir: str):
+    def __init__(self, model_dir: str, base: bool = False):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        # mix16 SFT model: tokenizer ships in the model dir; role turns use the
-        # *text* markers "<|user|>"/"<|assistant|>" (no dedicated role tokens).
+        self.base = base   # base LM: continue the prompt (no chat role markers)
         self.tok = Tokenizer.from_file(os.path.join(HERE, model_dir, "tokenizer.json"))
         self.E = self.tok.token_to_id("<|endoftext|>")
         self.U_ids = self.tok.encode("<|user|>\n").ids
         self.A_ids = self.tok.encode("<|assistant|>\n").ids
-        self.cfg = Config(vocab_size=self.tok.get_vocab_size(), n_layer=20, n_head=12,
-                          n_embd=768, block_size=512, tie_embeddings=True)
+        # infer the architecture from the checkpoint so ANY model size loads
+        sd = torch.load(os.path.join(HERE, model_dir, "model.pt"), map_location=self.device)
+        n_embd = sd["wte.weight"].shape[1]
+        n_layer = 1 + max(int(k.split(".")[1]) for k in sd if k.startswith("blocks."))
+        self.cfg = Config(vocab_size=self.tok.get_vocab_size(), n_layer=n_layer,
+                          n_head=n_embd // 64, n_embd=n_embd, block_size=1024, tie_embeddings=True)
         self.model = GPT(self.cfg).to(self.device)
-        self.model.load_state_dict(torch.load(os.path.join(HERE, model_dir, "model.pt")))
+        self.model.load_state_dict(sd)
         self.model.eval()
         self.lock = threading.Lock()
-        print(f"bot ready ({model_dir}) on {self.device}", flush=True)
+        print(f"bot ready ({model_dir}: {n_layer}L x {n_embd}d, {'base' if base else 'chat'}) on {self.device}", flush=True)
 
     @torch.no_grad()
     def reply(self, messages, temp: float = 0.3, max_new: int = 160,
@@ -45,11 +48,16 @@ class Bot:
         keep this small model out of the degenerate loops it otherwise falls into."""
         with self.lock:
             ids = []
-            for m in messages:
-                marker = self.U_ids if m.get("role") == "user" else self.A_ids
-                ids.extend(marker)
-                ids.extend(self.tok.encode(m.get("content", "")).ids)
-            ids.extend(self.A_ids)  # cue the assistant turn
+            if self.base:
+                # base LM: just continue the latest user text (no chat markers)
+                last = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+                ids = self.tok.encode(last).ids
+            else:
+                for m in messages:
+                    marker = self.U_ids if m.get("role") == "user" else self.A_ids
+                    ids.extend(marker)
+                    ids.extend(self.tok.encode(m.get("content", "")).ids)
+                ids.extend(self.A_ids)  # cue the assistant turn
             # keep the most recent context within the block size
             ids = ids[-(self.cfg.block_size - max_new):]
             idx = torch.tensor([ids], device=self.device)
@@ -130,10 +138,11 @@ def main():
     ap.add_argument("--port", type=int, default=8731)
     ap.add_argument("--model", default="sft16")
     ap.add_argument("--rag", action="store_true", help="retrieve passages before reading (RAFT reader)")
+    ap.add_argument("--base", action="store_true", help="base LM: continue the prompt (no chat markers)")
     ap.add_argument("--k", type=int, default=3)
     args = ap.parse_args()
     try:
-        bot = RagBot(args.model, k=args.k) if args.rag else Bot(args.model)
+        bot = RagBot(args.model, k=args.k) if args.rag else Bot(args.model, base=args.base)
     except Exception as e:  # model not trained yet: still serve the live dashboard
         bot = None
         print(f"no model loaded ({e!r}); serving dashboard only, /chat disabled", flush=True)

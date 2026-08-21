@@ -37,12 +37,16 @@ def main():
     ap.add_argument("--lr-scale", type=float, default=1.0)
     ap.add_argument("--ckpt-every", type=int, default=500)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--base", default="mix16", help="dir holding the pretrained base model.pt")
+    ap.add_argument("--data", default="sft16", help="dir with tokenizer.json + tokens.bin + loss_mask.bin")
+    ap.add_argument("--out", default=None, help="output dir for model.pt/ckpt.pt (default: --data)")
     args = ap.parse_args()
+    args.out = args.out or args.data
 
     torch.manual_seed(1337)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    tok = Tokenizer.from_file(os.path.join(HERE, "sft16", "tokenizer.json"))
+    tok = Tokenizer.from_file(os.path.join(HERE, args.data, "tokenizer.json"))
     E = tok.token_to_id("<|endoftext|>")
     U_ids, A_ids = tok.encode("<|user|>\n").ids, tok.encode("<|assistant|>\n").ids
     cfg = Config(vocab_size=tok.get_vocab_size(), n_layer=args.layers,
@@ -50,11 +54,11 @@ def main():
                  use_checkpoint=True, tie_embeddings=True)
 
     model = GPT(cfg).to(device)
-    model.load_state_dict(torch.load(os.path.join(HERE, "mix16", "model.pt")))
-    print(f"loaded mix16 base, {sum(p.numel() for p in model.parameters())/1e6:.1f}M params", flush=True)
+    model.load_state_dict(torch.load(os.path.join(HERE, args.base, "model.pt")))
+    print(f"loaded {args.base} base, {sum(p.numel() for p in model.parameters())/1e6:.1f}M params", flush=True)
 
-    tokens = np.memmap(os.path.join(HERE, "sft16", "tokens.bin"), dtype=np.uint16, mode="r").reshape(-1, SEQ_LEN)
-    mask = np.memmap(os.path.join(HERE, "sft16", "loss_mask.bin"), dtype=np.uint8, mode="r").reshape(-1, SEQ_LEN)
+    tokens = np.memmap(os.path.join(HERE, args.data, "tokens.bin"), dtype=np.uint16, mode="r").reshape(-1, SEQ_LEN)
+    mask = np.memmap(os.path.join(HERE, args.data, "loss_mask.bin"), dtype=np.uint8, mode="r").reshape(-1, SEQ_LEN)
     n_examples = tokens.shape[0]
     print(f"{n_examples:,} SFT examples", flush=True)
 
@@ -71,7 +75,8 @@ def main():
     optimizers = [opt_muon, opt_adam]
     base_lrs = [[g["lr"] for g in o.param_groups] for o in optimizers]
 
-    out_dir = os.path.join(HERE, "sft16")
+    out_dir = os.path.join(HERE, args.out)
+    os.makedirs(out_dir, exist_ok=True)
     ckpt_path = os.path.join(out_dir, "ckpt.pt")
     start_step = 0
     if args.resume and os.path.exists(ckpt_path):
@@ -104,11 +109,15 @@ def main():
         return (per_tok * w).sum() / w.sum().clamp(min=1)
 
     mode = "a" if start_step > 0 else "w"
-    log_file = open(os.path.join(HERE, "metrics.jsonl"), mode, buffering=1)
-    def log(**kv): log_file.write(json.dumps(kv) + "\n")
+    log_files = [open(os.path.join(HERE, "metrics.jsonl"), mode, buffering=1),
+                 open(os.path.join(HERE, f"metrics_{args.out}.jsonl"), mode, buffering=1)]
+    def log(**kv):
+        line = json.dumps(kv) + "\n"
+        for f in log_files:
+            f.write(line)
     log(event="start", num_steps=args.steps, params_m=round(sum(p.numel() for p in model.parameters())/1e6, 1),
         device=device, batch_size=args.batch_size, block_size=SEQ_LEN,
-        prompt="<|user|>What is a dog?<|assistant|>", data="sft16")
+        prompt="<|user|>What is a dog?<|assistant|>", data=args.out)
 
     chat_prompts = ["What is a dog?", "Tell me a story about a cat.",
                     "What is 17 plus 25?", "Why is the sky blue?"]
@@ -159,7 +168,8 @@ def main():
     final = "\n\n".join(chat_sample(q) for q in chat_prompts)
     print("\n--- final chat ---\n" + final)
     log(event="done", time_s=round(time.time()-t0, 1), sample=final)
-    log_file.close()
+    for f in log_files:
+        f.close()
 
 if __name__ == "__main__":
     main()

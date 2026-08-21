@@ -96,16 +96,16 @@
 </div>
 
 <div class="card" id="chat-card">
-  <h2>Chat with the bot <span style="font-weight:400;color:var(--muted)" id="chat-status"></span></h2>
+  <h2>Chat with big300c-sft <span style="font-weight:400;color:var(--muted)">(293M · fine-tuned · answers questions, facts shaky)</span> <span style="font-weight:400;color:var(--muted)" id="chat-status"></span></h2>
   <div class="chat-controls">
-    <label title="Send only your current question, with no prior turns — avoids the context-bleed a 156M model suffers from">
+    <label title="Send only your current prompt, with no prior turns — avoids context-bleed on a small model">
       <input id="chat-single" type="checkbox" checked> single-turn (no history)
     </label>
     <button id="chat-new" type="button">New chat</button>
   </div>
   <div id="chat-log"></div>
   <div class="chat-input">
-    <input id="chat-box" type="text" placeholder="Ask the mix16 bot something — simple questions work best (156M, fluent but shaky on facts)" autocomplete="off">
+    <input id="chat-box" type="text" placeholder="Give it the START of something to continue — e.g. 'The recipe for chocolate cookies:' or 'def quicksort(arr):'" autocomplete="off">
     <button id="chat-send">Send</button>
   </div>
 </div>
@@ -455,7 +455,7 @@ async function send() {
   addMsg("you", q);
   history.push({role: "user", content: q});
   // single-turn mode: send only the current question so prior turns can't
-  // bleed into the answer (a 156M model can't keep turns separate)
+  // bleed into the answer (a small model can't keep turns separate)
   const payload = singleTurn.checked ? [{role: "user", content: q}] : history;
   const pending = addMsg("bot pending", "thinking…");
   try {
